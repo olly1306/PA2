@@ -14,36 +14,43 @@ function Model(name) {
     this.name = name;
     this.iVertexBuffer = gl.createBuffer();
     this.iNormalBuffer = gl.createBuffer();
+    this.iTexCoordBuffer = gl.createBuffer();
     this.count = 0;
 
-    this.BufferData = function (vertices) {
-
+    this.BufferData = function (data) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertices), gl.STREAM_DRAW);
 
-        this.count = vertices.length / 3;
-    }
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iTexCoordBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.texCoords), gl.STREAM_DRAW);
+
+        this.count = data.vertices.length / 3;
+    };
 
     this.NormalBufferData = function (normals) {
-
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iNormalBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STREAM_DRAW);
 
         this.count = normals.length / 3;
-    }
+    };
 
     this.Draw = function () {
-
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
         gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(shProgram.iAttribVertex);
+
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iNormalBuffer);
         gl.vertexAttribPointer(shProgram.iAttribNormal, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(shProgram.iAttribNormal);
 
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iTexCoordBuffer);
+        gl.vertexAttribPointer(shProgram.iAttribTexCoord, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribTexCoord);
+
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.count);
-    }
+    };
 }
+
 
 
 // Constructor
@@ -76,34 +83,44 @@ function draw() {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    /* Set the values of the projection transformation */
-    let projection = m4.perspective(Math.PI / 8, 1, 8, 12);
+    const projection = m4.perspective(Math.PI / 8, 1, 8, 12);
+    const modelView = spaceball.getViewMatrix();
+    const rotateToPointZero = m4.axisRotation([0.707, 0.707, 0], 0.7);
+    const translateToPointZero = m4.translation(0, 0, -10);
 
-    /* Get the view matrix from the SimpleRotator object.*/
-    let modelView = spaceball.getViewMatrix();
+    const matAccum0 = m4.multiply(rotateToPointZero, modelView);
+    const matAccum1 = m4.multiply(translateToPointZero, matAccum0);
 
-    let rotateToPointZero = m4.axisRotation([0.707, 0.707, 0], 0.7);
-    let translateToPointZero = m4.translation(0, 0, -10);
-
-    let matAccum0 = m4.multiply(rotateToPointZero, modelView);
-    let matAccum1 = m4.multiply(translateToPointZero, matAccum0);
-
-    /* Multiply the projection matrix times the modelview matrix to give the
-       combined transformation matrix, and send that to the shader program. */
-    let modelViewProjection = m4.multiply(projection, matAccum1);
-
+    const modelViewProjection = m4.multiply(projection, matAccum1);
     gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, modelViewProjection);
 
-    let modelviewInv = new Float32Array(16);
-    let normalmatrix = new Float32Array(16);
+    const modelviewInv = new Float32Array(16);
+    const normalmatrix = new Float32Array(16);
     mat4Invert(modelViewProjection, modelviewInv);
     mat4Transpose(modelviewInv, normalmatrix);
-
     gl.uniformMatrix4fv(shProgram.iNormalMatrix, false, normalmatrix);
 
-    gl.uniform4fv(shProgram.iColor, [0.2, 0.8, 0, 1]);
-    gl.uniform3fv(shProgram.lightPosLoc, [5 * Math.cos(Date.now() * 0.001), 5 * Math.sin(Date.now() * 0.001), 0]);
+    // Динамічне положення світла
+    const lightX = 5 * Math.cos(Date.now() * 0.001);
+    const lightY = 5 * Math.sin(Date.now() * 0.001);
+    const lightZ = 5; // Висота світла над поверхнею
+    gl.uniform3fv(shProgram.lightPosLoc, [lightX, lightY, lightZ]);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, diffuseTexture);
+    gl.uniform1i(shProgram.iDiffuseMap, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, specularTexture);
+    gl.uniform1i(shProgram.iSpecularMap, 1);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, normalTexture);
+    gl.uniform1i(shProgram.iNormalMap, 2);
+
     surface.Draw();
+
+    window.requestAnimationFrame(draw);
 }
 
 
@@ -172,6 +189,7 @@ function updateGranularity() {
 function CreateSurfaceData(norms = false) {
     let vertexList = [];
     let normalsList = [];
+    let texCoordsList = [];
 
     const uStep = Math.PI * 2 / uGranularity;
     const vStep = Math.PI * 2 / vGranularity;
@@ -188,10 +206,18 @@ function CreateSurfaceData(norms = false) {
             vertexList.push(v2.x, v2.y, v2.z);
             vertexList.push(v3.x, v3.y, v3.z);
 
+            texCoordsList.push(i / (Math.PI * 2), j / (Math.PI * 2));
+            texCoordsList.push((i + uStep) / (Math.PI * 2), j / (Math.PI * 2));
+            texCoordsList.push(i / (Math.PI * 2), (j + vStep) / (Math.PI * 2));
+
             // Інший трикутник
             vertexList.push(v2.x, v2.y, v2.z);
             vertexList.push(v4.x, v4.y, v4.z);
             vertexList.push(v3.x, v3.y, v3.z);
+
+            texCoordsList.push((i + uStep) / (Math.PI * 2), j / (Math.PI * 2));
+            texCoordsList.push((i + uStep) / (Math.PI * 2), (j + vStep) / (Math.PI * 2));
+            texCoordsList.push(i / (Math.PI * 2), (j + vStep) / (Math.PI * 2));
 
             if (norms) {
                 // Нормалі для кожного трикутника
@@ -204,7 +230,7 @@ function CreateSurfaceData(norms = false) {
         }
     }
 
-    return norms ? normalsList : vertexList;
+    return norms ? normalsList : texCoordsList.length ? { vertices: vertexList, texCoords: texCoordsList } : vertexList;
    
 }
 
@@ -310,40 +336,195 @@ function createProgram(gl, vShader, fShader) {
 /**
  * initialization function that will be called when the page has loaded
  */
-function init() {
-    let canvas;
-    try {
-        let resolution = Math.min(window.innerHeight, window.innerWidth);
-        canvas = document.querySelector('canvas');
-        gl = canvas.getContext("webgl");
-        canvas.width = resolution;
-        canvas.height = resolution;
-        gl.viewport(0, 0, resolution, resolution);
-        if (!gl) {
-            throw "Browser does not support WebGL";
+// Texture variables
+let diffuseTexture, specularTexture, normalTexture;
+
+function loadTexture(gl, url) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    const level = 0;
+    const internalFormat = gl.RGBA;
+    const width = 1;
+    const height = 1;
+    const border = 0;
+    const srcFormat = gl.RGBA;
+    const srcType = gl.UNSIGNED_BYTE;
+    const pixel = new Uint8Array([255, 255, 255, 255]); // White pixel
+    gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, width, height, border, srcFormat, srcType, pixel);
+
+    const image = new Image();
+    image.onload = () => {
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, srcFormat, srcType, image);
+
+        if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+            gl.generateMipmap(gl.TEXTURE_2D);
+        } else {
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         }
-    }
-    catch (e) {
-        document.querySelector('"canvas-holder"').innerHTML =
+    };
+    image.src = url;
+
+    return texture;
+}
+
+function isPowerOf2(value) {
+    return (value & (value - 1)) === 0;
+}
+
+function initTextures() {
+    diffuseTexture = loadTexture(gl, 'diffuse.jpg');
+    specularTexture = loadTexture(gl, 'specular.jpg');
+    normalTexture = loadTexture(gl, 'normal.jpg');
+}
+
+function createShaderProgram() {
+    const vertexShaderSource = `
+        attribute vec3 vertex;
+        attribute vec3 normal;
+        attribute vec2 texCoord;
+
+        varying vec2 vTexCoord;
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+
+        uniform mat4 ModelViewProjectionMatrix;
+        uniform mat4 NormalMatrix;
+
+        void main() {
+            gl_Position = ModelViewProjectionMatrix * vec4(vertex, 1.0);
+            vTexCoord = texCoord;
+            vNormal = normalize(mat3(NormalMatrix) * normal);
+            vPosition = vec3(ModelViewProjectionMatrix * vec4(vertex, 1.0));
+        }
+    `;
+
+    const fragmentShaderSource = `
+        precision mediump float;
+
+        varying vec2 vTexCoord;
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+
+        uniform sampler2D diffuseMap;
+        uniform sampler2D specularMap;
+        uniform sampler2D normalMap;
+
+        uniform vec3 light;
+
+        void main() {
+            vec3 normal = texture2D(normalMap, vTexCoord).rgb * 2.0 - 1.0;
+            vec3 lightDir = normalize(light - vPosition);
+
+            // Diffuse
+            vec3 diffuseColor = texture2D(diffuseMap, vTexCoord).rgb;
+            float diffuse = max(dot(normal, lightDir), 0.0);
+
+            // Specular
+            vec3 viewDir = normalize(-vPosition);
+            vec3 reflectDir = reflect(-lightDir, normal);
+            vec3 specularColor = texture2D(specularMap, vTexCoord).rgb;
+            float specular = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+
+            vec3 color = diffuseColor * diffuse + specularColor * specular;
+            gl_FragColor = vec4(color, 1.0);
+        }
+    `;
+
+    const prog = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+
+    shProgram = new ShaderProgram('TexturedShader', prog);
+    shProgram.Use();
+
+    shProgram.iAttribVertex = gl.getAttribLocation(prog, "vertex");
+    shProgram.iAttribNormal = gl.getAttribLocation(prog, "normal");
+    shProgram.iAttribTexCoord = gl.getAttribLocation(prog, "texCoord");
+    shProgram.iModelViewProjectionMatrix = gl.getUniformLocation(prog, "ModelViewProjectionMatrix");
+    shProgram.iNormalMatrix = gl.getUniformLocation(prog, "NormalMatrix");
+    shProgram.iDiffuseMap = gl.getUniformLocation(prog, "diffuseMap");
+    shProgram.iSpecularMap = gl.getUniformLocation(prog, "specularMap");
+    shProgram.iNormalMap = gl.getUniformLocation(prog, "normalMap");
+    shProgram.lightPosLoc = gl.getUniformLocation(prog, "light");
+
+    // Передача ambient освітлення у шейдер
+    const ambientLight = [0.6, 0.6, 0.6]; // Рівень базового освітлення
+    const ambientLightLoc = gl.getUniformLocation(prog, "ambientLight");
+    gl.uniform3fv(ambientLightLoc, ambientLight);
+
+    const directionalLight = [0.5, 0.5, 1.0]; // Додаткове світло зверху і збоку
+    const directionalLightLoc = gl.getUniformLocation(shProgram.prog, "directionalLight");
+    gl.uniform3fv(directionalLightLoc, directionalLight);
+
+    const constantLight = [0.3, 0.3, 0.3]; // Постійне освітлення, додається до всього
+    const constantLightLoc = gl.getUniformLocation(shProgram.prog, "constantLight");
+    gl.uniform3fv(constantLightLoc, constantLight);
+}
+
+function draw() {
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const projection = m4.perspective(Math.PI / 8, 1, 8, 12);
+    const modelView = spaceball.getViewMatrix();
+    const rotateToPointZero = m4.axisRotation([0.707, 0.707, 0], 0.7);
+    const translateToPointZero = m4.translation(0, 0, -10);
+
+    const matAccum0 = m4.multiply(rotateToPointZero, modelView);
+    const matAccum1 = m4.multiply(translateToPointZero, matAccum0);
+
+    const modelViewProjection = m4.multiply(projection, matAccum1);
+    gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, modelViewProjection);
+
+    // Динамічне оновлення положення світла
+    const time = Date.now() * 0.001; // Час для анімації
+    const lightX = 5 * Math.cos(time);
+    const lightY = 5 * Math.sin(time);
+    const lightZ = 5; // Фіксована висота
+    gl.uniform3fv(shProgram.lightPosLoc, [lightX, lightY, lightZ]);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, diffuseTexture);
+    gl.uniform1i(shProgram.iDiffuseMap, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, specularTexture);
+    gl.uniform1i(shProgram.iSpecularMap, 1);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, normalTexture);
+    gl.uniform1i(shProgram.iNormalMap, 2);
+
+    surface.Draw();
+
+    window.requestAnimationFrame(draw);
+}
+
+function init() {
+    const canvas = document.querySelector('canvas');
+    const resolution = Math.min(window.innerHeight, window.innerWidth);
+    canvas.width = resolution;
+    canvas.height = resolution;
+    gl = canvas.getContext("webgl");
+
+    if (!gl) {
+        document.getElementById("canvas-holder").innerHTML =
             "<p>Sorry, could not get a WebGL graphics context.</p>";
         return;
     }
-    try {
-        initGL();  // initialize the WebGL graphics context
-    }
-    catch (e) {
-        document.getElementById("canvas-holder").innerHTML =
-            "<p>Sorry, could not initialize the WebGL graphics context: " + e + "</p>";
-        return;
-    }
+
+    initTextures();
+    createShaderProgram();
+
+    surface = new Model('Surface');
+    surface.BufferData(CreateSurfaceData());
+    surface.NormalBufferData(CreateSurfaceData(true));
 
     spaceball = new TrackballRotator(canvas, draw, 0);
 
-    updateGranularity();
-
- 
-
-    window.requestAnimationFrame(drawing);
+    window.requestAnimationFrame(draw);
 }
 
 function mat4Transpose(a, transposed) {
