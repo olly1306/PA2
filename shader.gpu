@@ -1,0 +1,101 @@
+
+// Vertex shader
+const vertexShaderSource = `
+attribute vec3 vertex;
+attribute vec3 normal;
+attribute vec2 textureCoords;
+
+uniform mat4 wInverseTranspose;
+uniform mat4 wMatrix;
+uniform vec3 LightWorldPosition;
+uniform vec3 ViewWorldPosition;
+uniform mat4 ModelViewProjectionMatrix;
+uniform vec2 fPoint;
+uniform float fRotation; // Новий параметр: кут обертання
+
+varying vec3 v_surfaceToView;
+varying vec3 v_surfaceToLight;
+varying vec3 v_normal;
+varying vec2 v_textureCoords;
+
+mat4 getRotationMat(float angle) {
+  float s = sin(angle);
+  float c = cos(angle);
+  return mat4(
+    c, -s, 0.0, 0.0,
+    s,  c, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0
+  );
+}
+
+mat4 getTranslateMat(vec2 t) {
+  return mat4(
+    1.0, 0.0, 0.0, t.x,
+    0.0, 1.0, 0.0, t.y,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0
+  );
+}
+
+void main() {
+    gl_Position = ModelViewProjectionMatrix * vec4(vertex, 1.0);
+
+    vec3 surfaceWorldPosition = (wMatrix * vec4(vertex, 1.0)).xyz;
+    v_surfaceToLight = LightWorldPosition - surfaceWorldPosition;
+    v_surfaceToView = ViewWorldPosition - surfaceWorldPosition;
+    v_normal = mat3(wInverseTranspose) * normal;
+
+    mat4 rotationMat = getRotationMat(fRotation);
+    mat4 translateMat = getTranslateMat(-fPoint);
+    mat4 translateBackMat = getTranslateMat(fPoint);
+
+    vec4 textureCoordTr = translateMat * vec4(textureCoords, 0, 0);
+    vec4 textureCoordRotate = rotationMat * textureCoordTr;
+    vec4 textureCoordTrBack = translateBackMat * textureCoordRotate;
+
+    v_textureCoords = vec2(textureCoordTrBack);
+}
+`;
+
+
+// Fragment shader
+const fragmentShaderSource = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+   precision highp float;
+#else
+   precision mediump float;
+#endif
+
+uniform vec4 color;
+uniform vec3 lightDir;
+uniform sampler2D tmu;
+
+varying vec3 v_surfaceToView;
+varying vec3 v_surfaceToLight;
+varying vec3 v_normal;
+varying vec2 v_textureCoords;
+
+
+void main() {
+    float shininess = 100.0;
+    vec3 normal = normalize(v_normal);
+
+    vec3 surfaceToLightDirection = normalize(v_surfaceToLight);
+    vec3 surfaceToViewDirection = normalize(v_surfaceToView);
+    vec3 halfVector = normalize(surfaceToLightDirection + surfaceToViewDirection);
+    
+    float dotDir = dot(surfaceToLightDirection, -lightDir);
+
+    float light = dot(normal, surfaceToLightDirection);
+    float specular = 0.0;
+    if (light > 0.0) {
+      specular = pow(dot(normal, halfVector), shininess);
+    }
+    
+    vec4 texture = texture2D(tmu, v_textureCoords);
+
+    gl_FragColor = texture * color;
+    gl_FragColor.rgb *= light;
+    gl_FragColor.rgb += specular;
+}`;
